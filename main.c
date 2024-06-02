@@ -1,49 +1,93 @@
-#include <stdio.h>
+#include "include/myCgame.h"
+#include "include/uastar.h"
 #include <ncurses.h>
 
-#define MAP_WIDTH 50
-#define MAP_HEIGHT 20
+void init(fnl_state *); //need to includde in header
 
-void draw_walls();
-void update();
-void handle_movement(int* x, int* y);
-
-int mains(){
-       int num = 10; // Declare an integer variable
-    int *ptr = &num; // Declare a pointer and assign the address of 'num' to it
-
-    // Dereference the pointer to access the value
-    printf("Value of num: %d\n", *ptr);
-}
-
-
-
+fnl_state noise_source;
+float* noise_map;
 
 int main(){
-    //init 
-    initscr();
-    cbreak();  
-    //noecho();  
-    keypad(stdscr, TRUE);  
-
-    update(); // main game loop
+    init(&noise_source);
+    noise_map = get_noise_map();
+    
+    update(); 
+    
     endwin();
+    free(noise_map);
     return 0;
 }
 
+void init(fnl_state *noise){
+    //Init Curses
+    initscr(); // must be first
+    start_color();
+    curs_set(0); // disable cursor
+    cbreak();  
+    noecho();  
+    keypad(stdscr, TRUE);  //enable keys for main screen
+    //nodelay(stdscr, TRUE); 
+    halfdelay(1000); // using this to limit fps, do it correctly!
+
+    //create color bindings
+    init_pair(1, COLOR_RED, COLOR_BLACK);
+    init_pair(2, COLOR_YELLOW, COLOR_BLACK); 
+    init_pair(3, COLOR_GREEN, COLOR_BLACK); 
+
+    //Init FastNoise
+    *noise = fnlCreateState();
+    noise->noise_type = FNL_NOISE_OPENSIMPLEX2;
+    noise->frequency = .1f;
+}
+
 void update(){
-    int x = 10;
-    int y = 10;
-    while (true)
-    {
-        draw_walls();
-        handle_movement(&x,&y);
-        
-        mvaddch(y,x,'@');
+    int max_x,max_y;
+    getmaxyx(stdscr, max_y, max_x);
+    
+    struct entity player = {19,30, 'P',FLOOR_TILE}; 
+    struct entity enemy = {12,9, 'E',FLOOR_TILE};                 
+   
+    Rectangle viewport;
+            viewport = (Rectangle){0,0,MAP_WIDTH,MAP_HEIGHT}; //DEBUG, show whole screen
+            draw_map(noise_map, map_array_size,viewport);
+         
+         draw_entity(&player);
+        draw_entity(&enemy);
+
+    // astar init
+    struct path_finder path_finder = {0};
+    path_finder_initialize(&path_finder);
+    path_finder.cols = MAP_WIDTH; 
+    path_finder.rows = MAP_HEIGHT;
+    path_finder.fill_func = astar_fill_callback; 
+    path_finder.score_func = NULL;
+    path_finder.data = noise_map;
+    path_finder_fill(&path_finder);
+
+    while (true){
+        handle_movement(&player);
+        //needs to be int TODO        
+        viewport = (Rectangle){0,0,MAP_WIDTH,MAP_HEIGHT}; //DEBUG, show whole screen
+        //viewport = (Rectangle){player.x-15,player.y-10,30,20}; 
+
+        erase();
+        draw_map(noise_map, map_array_size,viewport);
+        draw_entity(&player);
+        draw_entity(&enemy);
+            
+        do_astar(&path_finder,&enemy, &player);
+        draw_path(&path_finder);
+
         refresh();
     }
 }
-void draw_walls(){
+
+
+/*
+    Game Functions
+*/
+
+void draw_walls(){ 
     for (int x = 0; x < MAP_WIDTH; x++){
         for (int y = 0; y < MAP_HEIGHT; y++){
             if (y == 0 || y == MAP_HEIGHT-1)
@@ -57,36 +101,122 @@ void draw_walls(){
         }
     }
 }
-void handle_movement(int *x, int *y) {
+
+void handle_movement(struct entity* entity) {
     int ch;
     int tempx,tempy;
-    tempx = *x;
-    tempy = *y;
+    
+    ch = getch(); 
 
-    ch = getch();
+    if (ch == ERR) { return; }
 
+    tempx = entity->x;
+    tempy = entity->y;
+    
     switch (ch) {
         case KEY_UP:
-            mvaddch(*y,*x,' ');
             tempy--; 
             break;
         case KEY_DOWN:
-            mvaddch(*y,*x,' ');
             tempy++;
             break;
         case KEY_LEFT:
-            mvaddch(*y,*x,' ');
             tempx--;
             break;
         case KEY_RIGHT:
-            mvaddch(*y,*x,' ');
             tempx++;
             break;
-        }
-    if (mvinch(tempy,tempx) == '#'){
-        return;
     }
-    else 
-        *y = tempy;
-        *x = tempx;    
+        // Immovable object collision 
+    char c = mvinch(tempy,tempx); 
+    if (c == MOUNTAIN_TILE){
+        return;
+        
+    }
+    else{
+        move_entity(entity,tempx,tempy);  
+    } 
+}
+
+float* get_noise_map(){
+    //int max_x,max_y;
+    //getmaxyx(stdscr, max_y, max_x);
+    float* noiseData = malloc(MAP_WIDTH * MAP_HEIGHT * sizeof(float)); // need to do this, dynamic 
+    int index = 0;
+    for (int y = 0; y < MAP_HEIGHT; y++)
+    {
+        for (int x = 0; x < MAP_WIDTH; x++) 
+        {
+            noiseData[index++] = fnlGetNoise2D(&noise_source, (float) x, (float) y); // if you divide by bax, image is distorted
+        }
+    }
+    return noiseData;
+}
+
+void draw_map(float* noiseMap, int size, Rectangle viewport){
+    int width_x = (int)viewport.width;
+    for (int y = viewport.y; y <= viewport.y+viewport.height; y++) {
+        for (int x = viewport.x; x <= viewport.x+viewport.width; x++) {
+            float noiseValue = noise_map[(y * width_x) + x]; 
+            if (noiseValue >= .2f) {
+                attron(COLOR_PAIR(2));
+                mvaddch(y, x, MOUNTAIN_TILE);
+                attroff(COLOR_PAIR(2));
+            }
+            else {
+                //attron(COLOR_PAIR(3));
+                mvaddch(y, x, FLOOR_TILE);
+                //attroff(COLOR_PAIR(3));
+            }
+        }
+    }
+}
+
+void draw_entity(struct entity* entity){
+    attron(COLOR_PAIR(1));
+    mvaddch(entity->y,entity->x,entity->symbol);
+    attroff(COLOR_PAIR(1));
+}
+
+void move_tword_player(struct entity* entity,struct entity* player){
+    // this will move the entity towrds the player using astar*
+}
+
+void move_entity(struct entity* entity,int x, int y){
+    entity->y = y;
+    entity->x = x;   
+}
+
+static uint8_t astar_fill_callback(struct path_finder *path_finder, int32_t col, int32_t row){
+	uint8_t is_passable = 0;
+    float* noise_map = path_finder->data;
+    float noise_value = noise_map[(row * MAP_WIDTH) + col]; 
+
+	//if (mvinch(row,col) == FLOOR_TILE) { // think theres a bug here, path cutting through everything, is everything returning 1?
+    if (noise_value >= .2f)  {
+		is_passable = 1;
+	}
+	return is_passable;
+}
+
+void draw_path(struct path_finder* path_finder){
+    //int max_x,max_y;
+    //getmaxyx(stdscr, max_y, max_x);
+    
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            if (path_finder_is_path(path_finder, x, y)) {
+                attron(COLOR_PAIR(3));
+                mvaddch(y, x, PATH_TILE);
+                attroff(COLOR_PAIR(3));
+            }
+        }
+    }
+}
+
+void do_astar(struct path_finder* path_finder,struct entity* start, struct entity* end){
+    path_finder_clear_path(path_finder);
+    path_finder_set_start(path_finder, start->x, start->y);
+    path_finder_set_end(path_finder, end->x, end->y);
+    path_finder_find(path_finder,NULL);
 }

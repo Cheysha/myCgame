@@ -1,2 +1,2 @@
 myCapp:
-	gcc -o build/myCapp.out  main.c -lncurses 
+	gcc -g -o build/myCapp.out  main.c uastar.c -lncurses 
