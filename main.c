@@ -27,7 +27,7 @@ void init(fnl_state *noise){
     noecho();  
     keypad(stdscr, TRUE); //enable keys for main screen
     //nodelay(stdscr, TRUE); 
-    halfdelay(10); //using this to limit fps, do it correctly!
+    halfdelay(50); //using this to limit fps, do it correctly!
 
     //create color bindings
     init_pair(1, COLOR_RED, COLOR_BLACK);
@@ -45,61 +45,47 @@ void update(){
     //int max_x,max_y;
     //getmaxyx(stdscr, max_y, max_x);
     
-    struct entity player = {19,30, 'P',FLOOR_TILE}; 
-    struct entity enemy = {12,9, 'E',FLOOR_TILE};                 
+    struct entity player = {19,30, 'P'}; 
+    struct entity enemy = {12,9, 'E'};                 
                 viewport = (Rectangle){0,0,MAP_WIDTH,MAP_HEIGHT}; //DEBUG, show whole screen
     path_finder = init_astar(noise_map);
     while (true){
         /*
             UPDATE
         */
-        //viewport = (Rectangle){player.x-19,player.y-10,40,40};  // causing crazy issues
+        viewport = (Rectangle){player.x-20,player.y-10,40,20}; 
 
         handle_movement(&player);
-
+   
         if (is_point_inside_rect(&viewport,enemy.x, enemy.y)) {
             do_astar(&path_finder,&enemy, &player);
-        }
+        }else {path_finder_clear_path(&path_finder);}
 
         /*
             RENDER
         */
-        erase(); // May not be needed?
-        draw_map(noise_map, map_array_size,viewport);
+        erase(); 
+        draw_map(noise_map,&viewport);
+        
         draw_entity(&player);
         draw_entity(&enemy);
-        draw_path(&path_finder);
+
+
+        draw_paths(&path_finder, &viewport);
 
         refresh();
     }
 }
 
-
 /*
     Game Functions
 */
-/*
-void draw_walls(){ 
-    for (int x = 0; x < MAP_WIDTH; x++){
-        for (int y = 0; y < MAP_HEIGHT; y++){
-            if (y == 0 || y == MAP_HEIGHT-1)
-            {
-                mvaddch(y,x,'#');
-            }
-            if (x == 0 || x == MAP_WIDTH-1)
-            {
-                mvaddch(y,x,'#');
-            }
-        }
-    }
-}
-*/
+
 void handle_movement(struct entity* entity) {
     int ch;
     int tempx,tempy;
     
     ch = getch(); 
-
     if (ch == ERR) { return; }
 
     tempx = entity->x;
@@ -144,15 +130,18 @@ float* get_noise_map(){
     return noiseData;
 }
 
-void draw_map(float* noiseMap, int size, Rectangle viewport){
-    int width_x = (int)viewport.width;
-    for (int y = viewport.y; y <= viewport.y+viewport.height; y++) {
-        for (int x = viewport.x; x <= viewport.x+viewport.width; x++) {
-            float noiseValue = noise_map[(y * width_x) + x]; 
+void draw_map(float* noiseMap, Rectangle* viewport){
+    //int width_x = (int)viewport.width;
+    for (int y = 0; y <= MAP_HEIGHT; y++) {
+        for (int x = 0; x <= MAP_WIDTH; x++) {
+            float noiseValue = noise_map[(y * MAP_WIDTH) + x]; 
             if (noiseValue >= COLLISION_VALUE) {
+                if (is_point_inside_rect(viewport,x,y)){
                 attron(COLOR_PAIR(2));
                 mvaddch(y, x, MOUNTAIN_TILE);
                 attroff(COLOR_PAIR(2));
+                }
+                else{mvaddch(y, x, HIDDEN_TILE); }
             }
             else {
                 //attron(COLOR_PAIR(3));
@@ -189,13 +178,10 @@ static uint8_t astar_fill_callback(struct path_finder *path_finder, int32_t col,
 	return is_passable;
 }
 
-void draw_path(struct path_finder* path_finder){
-    //int max_x,max_y;
-    //getmaxyx(stdscr, max_y, max_x);
+void draw_paths(struct path_finder* path_finder,Rectangle* viewport){
     if (path_finder == NULL) {return;}
-
-    for (int x = 0; x < MAP_WIDTH; x++) {
-        for (int y = 0; y < MAP_HEIGHT; y++) {
+    for (int x = viewport->x; x <= viewport->x+viewport->width; x++) {
+        for (int y = viewport->y; y <= viewport->y+viewport->height; y++) {
             if (path_finder_is_path(path_finder, x, y)) {
                 attron(COLOR_PAIR(3));
                 mvaddch(y, x, PATH_TILE);
@@ -224,7 +210,25 @@ struct path_finder init_astar(float* noise_map){
     path_finder_fill(&path_finder);
     return path_finder;
 }
+
 bool is_point_inside_rect(Rectangle* rect, int point_x, int point_y) {
-  return (point_x > rect->x && point_x < rect->x + rect->width &&
+    return (point_x > rect->x && point_x < rect->x + rect->width &&
           point_y > rect->y && point_y < rect->y + rect->height);
+}
+
+// Check if point is inside rectangle
+bool CheckCollisionPointRec(Vector2 point, Rectangle rec){
+    bool collision = false;
+    if ((point.x >= rec.x) && (point.x < (rec.x + rec.width)) && (point.y >= rec.y) && (point.y < (rec.y + rec.height))) collision = true;
+    return collision;
+}
+
+// Check collision between two rectangles
+bool CheckCollisionRecs(Rectangle rec1, Rectangle rec2){
+    bool collision = false;
+
+    if ((rec1.x < (rec2.x + rec2.width) && (rec1.x + rec1.width) > rec2.x) &&
+        (rec1.y < (rec2.y + rec2.height) && (rec1.y + rec1.height) > rec2.y)) collision = true;
+
+    return collision;
 }
