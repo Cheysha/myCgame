@@ -1,11 +1,11 @@
 #include "include/myCgame.h"
 #include "include/uastar.h"
 #include <ncurses.h>
-
-void init(fnl_state *); //need to includde in header
+#include <time.h>
 
 fnl_state noise_source;
 float* noise_map;
+struct path_finder path_finder; 
 
 int main(){
     init(&noise_source);
@@ -19,63 +19,55 @@ int main(){
 }
 
 void init(fnl_state *noise){
-    //Init Curses
-    initscr(); // must be first
+        /* Init Curses */
+    initscr(); //must be first
     start_color();
-    curs_set(0); // disable cursor
+    curs_set(0); //disable cursor
     cbreak();  
     noecho();  
-    keypad(stdscr, TRUE);  //enable keys for main screen
+    keypad(stdscr, TRUE); //enable keys for main screen
     //nodelay(stdscr, TRUE); 
-    halfdelay(1000); // using this to limit fps, do it correctly!
+    halfdelay(10); //using this to limit fps, do it correctly!
 
     //create color bindings
     init_pair(1, COLOR_RED, COLOR_BLACK);
     init_pair(2, COLOR_YELLOW, COLOR_BLACK); 
     init_pair(3, COLOR_GREEN, COLOR_BLACK); 
 
-    //Init FastNoise
+    /* Init FastNoise */
     *noise = fnlCreateState();
     noise->noise_type = FNL_NOISE_OPENSIMPLEX2;
     noise->frequency = .1f;
 }
 
 void update(){
-    int max_x,max_y;
-    getmaxyx(stdscr, max_y, max_x);
+    Rectangle viewport;
+    //int max_x,max_y;
+    //getmaxyx(stdscr, max_y, max_x);
     
     struct entity player = {19,30, 'P',FLOOR_TILE}; 
     struct entity enemy = {12,9, 'E',FLOOR_TILE};                 
-   
-    Rectangle viewport;
-            viewport = (Rectangle){0,0,MAP_WIDTH,MAP_HEIGHT}; //DEBUG, show whole screen
-            draw_map(noise_map, map_array_size,viewport);
-         
-         draw_entity(&player);
-        draw_entity(&enemy);
-
-    // astar init
-    struct path_finder path_finder = {0};
-    path_finder_initialize(&path_finder);
-    path_finder.cols = MAP_WIDTH; 
-    path_finder.rows = MAP_HEIGHT;
-    path_finder.fill_func = astar_fill_callback; 
-    path_finder.score_func = NULL;
-    path_finder.data = noise_map;
-    path_finder_fill(&path_finder);
-
+                viewport = (Rectangle){0,0,MAP_WIDTH,MAP_HEIGHT}; //DEBUG, show whole screen
+    path_finder = init_astar(noise_map);
     while (true){
-        handle_movement(&player);
-        //needs to be int TODO        
-        viewport = (Rectangle){0,0,MAP_WIDTH,MAP_HEIGHT}; //DEBUG, show whole screen
-        //viewport = (Rectangle){player.x-15,player.y-10,30,20}; 
+        /*
+            UPDATE
+        */
+        //viewport = (Rectangle){player.x-19,player.y-10,40,40};  // causing crazy issues
 
-        erase();
+        handle_movement(&player);
+
+        if (is_point_inside_rect(&viewport,enemy.x, enemy.y)) {
+            do_astar(&path_finder,&enemy, &player);
+        }
+
+        /*
+            RENDER
+        */
+        erase(); // May not be needed?
         draw_map(noise_map, map_array_size,viewport);
         draw_entity(&player);
         draw_entity(&enemy);
-            
-        do_astar(&path_finder,&enemy, &player);
         draw_path(&path_finder);
 
         refresh();
@@ -86,7 +78,7 @@ void update(){
 /*
     Game Functions
 */
-
+/*
 void draw_walls(){ 
     for (int x = 0; x < MAP_WIDTH; x++){
         for (int y = 0; y < MAP_HEIGHT; y++){
@@ -101,7 +93,7 @@ void draw_walls(){
         }
     }
 }
-
+*/
 void handle_movement(struct entity* entity) {
     int ch;
     int tempx,tempy;
@@ -128,10 +120,9 @@ void handle_movement(struct entity* entity) {
             break;
     }
         // Immovable object collision 
-    char c = mvinch(tempy,tempx); 
-    if (c == MOUNTAIN_TILE){
+    float noise_value = noise_map[(tempy * MAP_WIDTH) + tempx]; 
+    if (noise_value >= COLLISION_VALUE){
         return;
-        
     }
     else{
         move_entity(entity,tempx,tempy);  
@@ -158,7 +149,7 @@ void draw_map(float* noiseMap, int size, Rectangle viewport){
     for (int y = viewport.y; y <= viewport.y+viewport.height; y++) {
         for (int x = viewport.x; x <= viewport.x+viewport.width; x++) {
             float noiseValue = noise_map[(y * width_x) + x]; 
-            if (noiseValue >= .2f) {
+            if (noiseValue >= COLLISION_VALUE) {
                 attron(COLOR_PAIR(2));
                 mvaddch(y, x, MOUNTAIN_TILE);
                 attroff(COLOR_PAIR(2));
@@ -192,8 +183,7 @@ static uint8_t astar_fill_callback(struct path_finder *path_finder, int32_t col,
     float* noise_map = path_finder->data;
     float noise_value = noise_map[(row * MAP_WIDTH) + col]; 
 
-	//if (mvinch(row,col) == FLOOR_TILE) { // think theres a bug here, path cutting through everything, is everything returning 1?
-    if (noise_value >= .2f)  {
+    if (noise_value <= COLLISION_VALUE)  {
 		is_passable = 1;
 	}
 	return is_passable;
@@ -202,7 +192,8 @@ static uint8_t astar_fill_callback(struct path_finder *path_finder, int32_t col,
 void draw_path(struct path_finder* path_finder){
     //int max_x,max_y;
     //getmaxyx(stdscr, max_y, max_x);
-    
+    if (path_finder == NULL) {return;}
+
     for (int x = 0; x < MAP_WIDTH; x++) {
         for (int y = 0; y < MAP_HEIGHT; y++) {
             if (path_finder_is_path(path_finder, x, y)) {
@@ -215,8 +206,25 @@ void draw_path(struct path_finder* path_finder){
 }
 
 void do_astar(struct path_finder* path_finder,struct entity* start, struct entity* end){
+    if (path_finder == NULL) { return; }
     path_finder_clear_path(path_finder);
     path_finder_set_start(path_finder, start->x, start->y);
     path_finder_set_end(path_finder, end->x, end->y);
     path_finder_find(path_finder,NULL);
+}
+
+struct path_finder init_astar(float* noise_map){
+    struct path_finder path_finder = {0};
+    path_finder_initialize(&path_finder);
+    path_finder.cols = MAP_WIDTH; 
+    path_finder.rows = MAP_HEIGHT;
+    path_finder.fill_func = astar_fill_callback; 
+    path_finder.score_func = NULL;
+    path_finder.data = noise_map;
+    path_finder_fill(&path_finder);
+    return path_finder;
+}
+bool is_point_inside_rect(Rectangle* rect, int point_x, int point_y) {
+  return (point_x > rect->x && point_x < rect->x + rect->width &&
+          point_y > rect->y && point_y < rect->y + rect->height);
 }

@@ -16,6 +16,7 @@
 #define MOUNTAIN_TILE '^'
 #define FENCE_TILE '#'
 #define PATH_TILE '.'
+#define COLLISION_VALUE .2f
 
 
 
@@ -38,6 +39,7 @@ typedef struct Rectangle {
     float height;           // Rectangle height
 } Rectangle;
 
+void init(fnl_state *); //need to includde in header
 void draw_walls();
 void update();
 void handle_movement(struct entity* entity);
@@ -51,6 +53,6 @@ static uint8_t astar_fill_callback(struct path_finder *path_finder, int32_t col,
 void draw_path(struct path_finder* path_finder);
 void do_astar(struct path_finder* path_finder,struct entity* start, struct entity* end);
 struct path_finder init_astar(float* noise_map);
-
+bool is_point_inside_rect(Rectangle* rect, int point_x, int point_y); 
 int map_array_size = MAP_HEIGHT * MAP_WIDTH * sizeof(float); 
 
